@@ -1,0 +1,7 @@
+# Phase 0 runtime — all-CPU project, no torch needed until Phase 1
+# (classifier inference; add torch pins from wafer-mixed then).
+duckdb>=1.5
+numpy>=2.0
+pandas>=2.0
+matplotlib>=3.8
+pyyaml>=6.0
