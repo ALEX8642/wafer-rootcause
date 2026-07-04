@@ -138,3 +138,76 @@ label × step × chamber grid, ranked suspects; window localisation via
 rolling rates; scorer (precision@1/@3, recall, window IoU, latency) —
 `ground_truth_faults` allowed in the scorer only. Figures + docs/ANALYSIS.md.
 Watch F3 (needs time resolution) and the ETCH-T1-C1 Loc false suspect.
+
+## Phase 2 — Root-cause attribution ✅ (2026-07-04)
+
+**Scored attribution (baseline: seed 42, 1,000 wafers, 5 planted faults):**
+
+| metric | value |
+|---|---|
+| attribution precision@1 | **1.000** (4 rank-1 flags, all true faults) |
+| attribution recall@1 (= @3) | **0.800** (4 of 5 faults) |
+| false discoveries | 0 of 184 grid tests at BH FDR 0.05 |
+| mean window IoU (4 recovered) | **0.866** |
+| mean abs. detection latency | 3.25 h |
+
+Per fault: F1 rank 1, IoU 1.00 · F2 rank 1, IoU 0.86 · F4 rank 1, IoU 0.81
+· F5 rank 1, IoU 0.80 · **F3 missed** (rank 3, q = 0.49 — 40 h window
+diluted by ~100 h of clean traffic in the whole-horizon marginal; its
+excursion window WAS detected at IoU 0.45 but nothing routes an analyst
+there; see docs/ANALYSIS.md). The ETCH-T1-C1 Loc coincidence from Phase 1's
+EDA died correctly under BH (q = 0.33).
+
+**Done:**
+- `sql/attr_suspects.sql` — the headline: chamber vs rest-of-step
+  two-proportion z per (label, chamber) cell (184 tests), one-sided p via
+  inlined Abramowitz–Stegun 7.1.26 (stock DuckDB has no erf; stays portable
+  arithmetic), Benjamini–Hochberg via window functions, per-label suspect
+  ranking. Verified in tests against scipy (|Δp| < 1.5e-7) and a numpy BH
+  reimplementation (exact).
+- `sql/attr_windows.sql` — localisation: 6 h buckets of chamber-processing
+  time (4 h fragmented runs on sparse chambers — IoU for F1 went 0.42 → 1.00
+  at 6 h), centred 3-bucket rolling rate, flag at rest + 2 binomial SE,
+  gaps-and-islands runs, ≥ 2 buckets and ≥ 5 excess defects, best run per
+  cell. `sql/attr_bucket_rates.sql` feeds the timeline heatmap.
+- `sql/score_faults.sql` — scorer (the ONLY analysis-era file allowed to
+  read ground_truth_faults): per-fault rank/q/IoU/latency;
+  `attribution.score()` aggregates precision@k / recall@k. Firewall now
+  test-enforced (comment-stripped grep over sql/ in test_attribution.py).
+- `scripts/attribute.py` — analysis → scorer banner → 3 figures:
+  attr_suspect_ranking (top 10 + below-fold planted fault at true rank),
+  attr_rate_by_chamber (hit F5 vs miss F3 panels), attr_timeline_heatmap
+  (Scratch, detected windows outlined — analysis-side only).
+- `docs/ANALYSIS.md` — method + scored tables + three honesty sections:
+  the F3 miss (whole-horizon dilution; scan stats deliberately not built),
+  windows-localise-don't-detect (28 windows, only 4 on significant cells;
+  the Edge-Ring echo mechanism), F4 recovered despite being planted weak
+  (detection limit unmeasured → Phase 3(d) sweep).
+- Tests: **31 passing** (22 prior + 9 new) — grid coverage/partition
+  invariants, z vs direct computation, p vs scipy, BH vs numpy, rank
+  ordering, window well-formedness, deterministic strong-fault recovery
+  (F1/F5 rank 1 + IoU > 0.5), synthetic hand-checked scorer arithmetic,
+  firewall grep.
+
+**Decisions / deviations:**
+- Suspect rank runs across all 23 chambers per label (not per step) — a
+  fault could be at any step, so the per-label walk-down list is the
+  deliverable. Cross-step "echo" excursions are why rank + BH must lead
+  and windows follow (documented mechanism in ANALYSIS.md).
+- Window detector gates: min 5 excess defects per run — without it,
+  near-zero-baseline labels (Near-full, Random) emitted one-wafer "rate
+  excursions". 62 → 28 windows, no effect on fault cells.
+- p-values in SQL rather than Python: keeps the whole test in one
+  readable/portable query; the A&S approximation error bound is quoted in
+  the file header and asserted in tests.
+- attribution params live as SQL `params` CTEs (bucket_hours 6, sigma 2,
+  min_roll_n 10, min_run_buckets 2, min_excess 5; alpha 0.05 duplicated as
+  `attribution.ALPHA` for the scorer/figures — keep in sync).
+
+**Next (Phase 3, fresh session):** adversarial configs one lever at a time,
+same seeds — (a) correlated routing (the echo mechanism above becomes a
+real trap), (b) two same-label overlapping faults, (c) intermittent fault,
+(d) intensity sweep p_acquire → baseline (F4 came back rank 1 at 0.25, so
+the sweep must go lower to find the floor); classifier-noise ablation
+(oracle labels vs raw @0.5 vs calibrated @τ) reusing the cached raw logits
+— no new inference needed. → docs/SENSITIVITY.md + figures.

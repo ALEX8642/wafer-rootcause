@@ -11,6 +11,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from wafer_rootcause.attach import (assign_maps, load_test_inventory,  # noqa: E402
                                     record_assignment, wafer_combos)
+from wafer_rootcause.attribution import suspects, windows  # noqa: E402
 from wafer_rootcause.config import AttachConfig, SimConfig  # noqa: E402
 from wafer_rootcause.db import build_db, connect, read_parquet  # noqa: E402
 from wafer_rootcause.predict import load_classifier_outputs  # noqa: E402
@@ -61,6 +62,18 @@ def attached_db(tables, assignment, cache, tmp_path_factory):
     load_classifier_outputs(con, assignment, cache)
     yield con
     con.close()
+
+
+@pytest.fixture(scope="session")
+def suspects_df(attached_db):
+    """attr_suspects.sql on the Phase 1 DB (analysis side)."""
+    return suspects(attached_db)
+
+
+@pytest.fixture(scope="session")
+def windows_df(attached_db):
+    """attr_windows.sql on the Phase 1 DB (analysis side)."""
+    return windows(attached_db)
 
 
 @pytest.fixture(scope="session")
