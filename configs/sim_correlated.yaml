@@ -1,0 +1,52 @@
+# sim_correlated.yaml — Phase 3(a): correlated routing, the false-attribution
+# trap. ONE lever vs sim_baseline.yaml: dispatch couples the DEPOSITION
+# chamber choice to the ETCH chamber choice (strength 0.8); everything else
+# — seed, route, baseline rates, faults — is identical.
+#
+# The trap this plants: wafers through faulty ETCH-T1-C2 (F1, index 1 of
+# ETCH's 6 chambers) preferentially land in DEPOSITION-T1-C2 (index 1 mod 4),
+# so that innocent chamber inherits an Edge-Ring excursion. ETCH-T2-C3
+# (F5, index 5) maps to the SAME decoy chamber (5 mod 4 = 1), which also
+# inherits Edge-Loc. And the coupling runs backwards too: wafers reaching
+# F2's DEPOSITION-T2-C1 (index 2) mostly came via ETCH-T1-C3, making that
+# an upstream Center decoy. The question Phase 3 asks: does the per-step
+# contrast + BH blame the innocents or hold the line?
+
+seed: 42
+sim_start: "2026-06-01 00:00:00"
+product: PRD-A
+n_lots: 40
+wafers_per_lot: 25
+lot_interarrival_hours: 4.0
+wafer_stagger_minutes: 2.0
+queue_mean_minutes: 10.0
+inspect_delay_minutes: 30.0
+dispatch: correlated           # <- the lever
+coupling:
+  driver_step: ETCH
+  follower_step: DEPOSITION
+  strength: 0.8                # P(follower chamber = driver index mod 4)
+db_path: outputs/sens_correlated.duckdb
+
+route:
+  - {name: OXIDATION,  process_type: furnace,     tools: 2, chambers_per_tool: 2, process_minutes: 50}
+  - {name: LITHO,      process_type: lithography, tools: 3, chambers_per_tool: 1, process_minutes: 30}
+  - {name: ETCH,       process_type: dry_etch,    tools: 2, chambers_per_tool: 3, process_minutes: 40}
+  - {name: DEPOSITION, process_type: cvd,         tools: 2, chambers_per_tool: 2, process_minutes: 45}
+  - {name: IMPLANT,    process_type: ion_implant, tools: 2, chambers_per_tool: 1, process_minutes: 25}
+  - {name: CMP,        process_type: cmp,         tools: 2, chambers_per_tool: 2, process_minutes: 35}
+
+baseline:
+  center_donut: 0.38
+  edge: 0.38
+  loc: 0.32
+  scratch: 0.32
+  near_full: 0.02
+  random_pattern: 0.05
+
+faults:
+  - {fault_id: F1, chamber: ETCH-T1-C2,       label: Edge-Ring, start_hour: 24,  duration_hours: 48, p_acquire: 0.70}
+  - {fault_id: F2, chamber: DEPOSITION-T2-C1, label: Center,    start_hour: 60,  duration_hours: 50, p_acquire: 0.50}
+  - {fault_id: F3, chamber: CMP-T1-C2,        label: Scratch,   start_hour: 10,  duration_hours: 40, p_acquire: 0.50}
+  - {fault_id: F4, chamber: OXIDATION-T2-C1,  label: Donut,     start_hour: 90,  duration_hours: 40, p_acquire: 0.25}
+  - {fault_id: F5, chamber: ETCH-T2-C3,       label: Edge-Loc,  start_hour: 95,  duration_hours: 40, p_acquire: 0.60}

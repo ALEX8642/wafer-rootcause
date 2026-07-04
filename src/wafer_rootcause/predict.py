@@ -160,16 +160,69 @@ def ensure_prediction_cache(acfg: AttachConfig, cache_path: Path,
     return cache
 
 
-def load_classifier_outputs(con: duckdb.DuckDBPyConnection,
-                            assignment: pd.DataFrame,
-                            cache: pd.DataFrame) -> int:
-    """Join assignment × cache and (re)load classifier_outputs. Returns rows."""
+ABLATION_MODES = ("calibrated", "raw", "oracle")
+
+
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def _oracle_rows(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """A perfect classifier: predicted == the simulated truth, prob in {0,1}.
+
+    Reads ground_truth_wafer_labels — harness side, exactly like attach.py
+    realises the simulated truth as pixels. The analysis SQL still sees only
+    classifier_outputs; this just fills it with a noiseless decision so the
+    ablation can isolate how much classifier error costs in attribution.
+    """
+    labels_df = pd.DataFrame({"label": LABELS})  # noqa: F841 — replacement scan
+    return con.execute("""
+        SELECT w.wafer_id, l.label,
+               CASE WHEN g.wafer_id IS NULL THEN 0.0 ELSE 1.0 END AS prob,
+               g.wafer_id IS NOT NULL                            AS predicted
+        FROM wafers w
+        CROSS JOIN labels_df l
+        LEFT JOIN ground_truth_wafer_labels g
+               ON g.wafer_id = w.wafer_id AND g.label = l.label
+    """).df()
+
+
+def classifier_output_rows(assignment: pd.DataFrame, cache: pd.DataFrame,
+                           mode: str = "calibrated") -> pd.DataFrame:
+    """(wafer_id, label, prob, predicted) rows for one non-oracle mode.
+
+    calibrated — Phase 1's tuned path: temperature-scaled prob, predicted =
+                 prob > per-label tau (straight from the cache).
+    raw        — the SAME cached logits decided naively: prob = sigmoid(logit),
+                 predicted = prob > 0.5. No new inference.
+    """
     missing = set(assignment["map_id"]) - set(cache["map_id"])
     if missing:
         raise ValueError(f"{len(missing)} assigned map_ids absent from the "
                          "prediction cache — rebuild it (--rebuild-cache)")
-    rows = assignment.merge(cache[["map_id", "label", "prob", "predicted"]],
-                            on="map_id")  # noqa: F841 — DuckDB replacement scan
+    col = cache
+    if mode == "raw":
+        prob = _sigmoid(cache["logit"].to_numpy())
+        col = cache.assign(prob=prob, predicted=prob > 0.5)
+    elif mode != "calibrated":
+        raise ValueError(f"mode {mode!r} not in {ABLATION_MODES}")
+    return assignment.merge(col[["map_id", "label", "prob", "predicted"]],
+                            on="map_id")
+
+
+def load_classifier_outputs(con: duckdb.DuckDBPyConnection,
+                            assignment: pd.DataFrame,
+                            cache: pd.DataFrame,
+                            mode: str = "calibrated") -> int:
+    """(Re)load classifier_outputs under an ablation mode. Returns row count.
+
+    mode is one of ABLATION_MODES; 'oracle' ignores the cache and reads the
+    simulated truth (see _oracle_rows), the other two join assignment × cache.
+    """
+    if mode not in ABLATION_MODES:
+        raise ValueError(f"mode {mode!r} not in {ABLATION_MODES}")
+    rows = (_oracle_rows(con) if mode == "oracle"        # noqa: F841
+            else classifier_output_rows(assignment, cache, mode))
     con.execute("DELETE FROM classifier_outputs")
     con.execute("""
         INSERT INTO classifier_outputs BY NAME

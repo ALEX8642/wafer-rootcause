@@ -7,8 +7,9 @@ name (see sql/schema.sql). Deterministic per (config, seed): one
 Label mechanics
 ---------------
 1. Faults first (config order): a wafer is *exposed* to a fault if its
-   history row at the fault's chamber starts inside the fault window;
-   exposed wafers acquire the signature label with p_acquire.
+   history row at the fault's chamber starts inside the fault window (for
+   duty-cycled faults: inside an on-phase of the window); exposed wafers
+   acquire the signature label with p_acquire.
 2. Baseline contamination everywhere: per exclusivity group (Center/Donut,
    Edge-Loc/Edge-Ring — member picked uniformly), then Loc, Scratch, and
    the single-only Near-full / Random (which labels.can_add lets through
@@ -68,15 +69,26 @@ def simulate(cfg: SimConfig) -> dict[str, pd.DataFrame]:
                            "lot_id": lot_id, "wafer_index": wi})
 
     # ---- wafer process history ----------------------------------------
+    # dispatch == 'random' draws exactly as before (no extra rng calls), so
+    # baseline runs stay byte-identical across this Phase 3 extension.
+    coupling = cfg.coupling
     history = []
     last_end: dict[str, datetime] = {}  # wafer_id -> end of its final step
     for w in wafers:
         t = lot_start_by_id[w["lot_id"]] + timedelta(
             minutes=(w["wafer_index"] - 1) * cfg.wafer_stagger_minutes)
+        driver_idx: int | None = None  # this wafer's choice at the driver step
         for spec, step_row in zip(cfg.route, steps):
             step_id = step_row["step_id"]
-            chamber_id = step_chambers[step_id][
-                rng.integers(len(step_chambers[step_id]))]
+            pool = step_chambers[step_id]
+            if (coupling is not None and spec.name == coupling.follower_step
+                    and rng.random() < coupling.strength):
+                idx = driver_idx % len(pool)  # validated: driver comes first
+            else:
+                idx = int(rng.integers(len(pool)))
+            if coupling is not None and spec.name == coupling.driver_step:
+                driver_idx = idx
+            chamber_id = pool[idx]
             start = t + timedelta(
                 minutes=float(rng.exponential(cfg.queue_mean_minutes)))
             end = start + timedelta(
@@ -88,6 +100,9 @@ def simulate(cfg: SimConfig) -> dict[str, pd.DataFrame]:
         last_end[w["wafer_id"]] = t
 
     # ---- faults → absolute windows ------------------------------------
+    # ground_truth_faults records the [start_ts, end_ts] envelope; the duty
+    # fields ride along in these dicts for the exposure test only (the
+    # explicit column list below keeps them out of the DB).
     faults = []
     for f in cfg.faults:
         f_start = sim_start + timedelta(hours=f.start_hour)
@@ -95,7 +110,20 @@ def simulate(cfg: SimConfig) -> dict[str, pd.DataFrame]:
                        "signature_label": f.label,
                        "start_ts": f_start,
                        "end_ts": f_start + timedelta(hours=f.duration_hours),
-                       "p_acquire": f.p_acquire})
+                       "p_acquire": f.p_acquire,
+                       "duty_on_hours": f.duty_on_hours,
+                       "duty_off_hours": f.duty_off_hours})
+
+    def exposed(f: dict, ts: datetime) -> bool:
+        """Inside the envelope, and — if duty-cycled — inside an on-phase
+        (phases cycle on-first from start_ts)."""
+        if not f["start_ts"] <= ts <= f["end_ts"]:
+            return False
+        if f["duty_on_hours"] is None:
+            return True
+        period = f["duty_on_hours"] + f["duty_off_hours"]
+        into = (ts - f["start_ts"]).total_seconds() / 3600.0
+        return into % period < f["duty_on_hours"]
 
     # exposure lookup: wafer_id -> [fault rows], from its own history
     hist_by_chamber: dict[str, list[dict]] = {}
@@ -104,7 +132,7 @@ def simulate(cfg: SimConfig) -> dict[str, pd.DataFrame]:
     exposures: dict[str, list[dict]] = {}
     for f in faults:
         for row in hist_by_chamber.get(f["chamber_id"], []):
-            if f["start_ts"] <= row["start_ts"] <= f["end_ts"]:
+            if exposed(f, row["start_ts"]):
                 exposures.setdefault(row["wafer_id"], []).append(f)
 
     # ---- label assignment (fixed draw order per wafer) -----------------

@@ -1,0 +1,50 @@
+# sim_intermittent.yaml — Phase 3(c): duty-cycled (intermittent) fault.
+# ONE lever vs sim_baseline.yaml: F1 cycles 8 h on / 8 h off inside its
+# unchanged 24–72 h envelope (on-phases 24–32, 40–48, 56–64 h → 24 of 48
+# exposure hours); everything else is identical.
+#
+# What this stresses: the whole-horizon suspect test sees roughly half of
+# F1's baseline evidence (does the strongest fault survive dilution?), and
+# the window detector — 6 h buckets, 3-bucket rolling smear — faces an
+# excursion that switches off twice mid-window. Scoring note: window IoU
+# is judged against the 24–72 h ENVELOPE (ground_truth_faults records the
+# envelope; the duty cycle lives only here), so a detector that perfectly
+# traced the on-phases would score IoU 0.5 — docs/SENSITIVITY.md reads the
+# number accordingly.
+
+seed: 42
+sim_start: "2026-06-01 00:00:00"
+product: PRD-A
+n_lots: 40
+wafers_per_lot: 25
+lot_interarrival_hours: 4.0
+wafer_stagger_minutes: 2.0
+queue_mean_minutes: 10.0
+inspect_delay_minutes: 30.0
+dispatch: random
+db_path: outputs/sens_intermittent.duckdb
+
+route:
+  - {name: OXIDATION,  process_type: furnace,     tools: 2, chambers_per_tool: 2, process_minutes: 50}
+  - {name: LITHO,      process_type: lithography, tools: 3, chambers_per_tool: 1, process_minutes: 30}
+  - {name: ETCH,       process_type: dry_etch,    tools: 2, chambers_per_tool: 3, process_minutes: 40}
+  - {name: DEPOSITION, process_type: cvd,         tools: 2, chambers_per_tool: 2, process_minutes: 45}
+  - {name: IMPLANT,    process_type: ion_implant, tools: 2, chambers_per_tool: 1, process_minutes: 25}
+  - {name: CMP,        process_type: cmp,         tools: 2, chambers_per_tool: 2, process_minutes: 35}
+
+baseline:
+  center_donut: 0.38
+  edge: 0.38
+  loc: 0.32
+  scratch: 0.32
+  near_full: 0.02
+  random_pattern: 0.05
+
+faults:
+  # <- the lever: duty-cycled; envelope and p_acquire unchanged vs baseline
+  - {fault_id: F1, chamber: ETCH-T1-C2,       label: Edge-Ring, start_hour: 24,  duration_hours: 48, p_acquire: 0.70,
+     duty_on_hours: 8, duty_off_hours: 8}
+  - {fault_id: F2, chamber: DEPOSITION-T2-C1, label: Center,    start_hour: 60,  duration_hours: 50, p_acquire: 0.50}
+  - {fault_id: F3, chamber: CMP-T1-C2,        label: Scratch,   start_hour: 10,  duration_hours: 40, p_acquire: 0.50}
+  - {fault_id: F4, chamber: OXIDATION-T2-C1,  label: Donut,     start_hour: 90,  duration_hours: 40, p_acquire: 0.25}
+  - {fault_id: F5, chamber: ETCH-T2-C3,       label: Edge-Loc,  start_hour: 95,  duration_hours: 40, p_acquire: 0.60}

@@ -211,3 +211,85 @@ real trap), (b) two same-label overlapping faults, (c) intermittent fault,
 the sweep must go lower to find the floor); classifier-noise ablation
 (oracle labels vs raw @0.5 vs calibrated @τ) reusing the cached raw logits
 — no new inference needed. → docs/SENSITIVITY.md + figures.
+
+## Phase 3 — Confounders + sensitivity ✅ (2026-07-04)
+
+**Headline findings (all driving the UNCHANGED Phase 2 SQL; no new inference):**
+
+1. **Seed 42 was lucky.** Baseline over 5 seeds {42,1,2,3,4}: recall@1 =
+   **0.48 ± 0.30** (Phase 2's 0.80 was the top of the distribution, not the
+   centre), precision@1 = **1.00**, mean IoU 0.76. Per-fault recovery: F1 0.8,
+   F2 0.6, F5 0.6, F3 0.2, F4 0.2 — strong faults land, diluted/weak ones are
+   coin-flips. A single draw is not a recall measurement.
+2. **Confounders (one lever each, same 5 seeds):** correlated recall 0.32 /
+   prec 0.90; overlap 0.30 / 0.92; intermittent 0.36 / 0.90. Recall drops
+   under every lever (less in-window signal per cell); precision slips to ~0.90
+   — but the correlated-routing decoy does **not** out-rank its true source
+   (per-step contrast holds; the coupled innocent chamber is not blamed). The
+   0.10 precision loss is BH's controlled FDR becoming visible + near-zero
+   (Near-full/Random) small-count artifacts, not the designed trap working.
+3. **Classifier-noise ablation is a NULL.** oracle / calibrated / raw@0.5 give
+   **identical** recall@1 0.48, precision@1 1.00, IoU 0.757 despite 0 / 9 / 16
+   label escapes. Attribution aggregates ~250 wafers/cell; a handful of errors
+   can't move a chamber proportion. **Fewer escapes bought nothing in root
+   cause** — attribution is statistics-bound, not classifier-bound (would flip
+   only if per-cell counts fell to tens of wafers).
+4. **Detection floor measured.** F4 intensity sweep (0.02→0.25, ×5 seeds,
+   calibrated vs oracle both identical): recall 0 until p_acquire ≈ 0.16, only
+   0.2 at 0.25. A 40 h fault on a 0.19-baseline label needs to ~double its
+   local rate before the whole-horizon marginal sees it — the dilution limit
+   Phase 2 flagged on F3, now quantified.
+
+**Done:**
+- Simulator extensions (`config.py` + `simulate.py`): `dispatch: correlated`
+  with a `CouplingSpec` (follower step's chamber index follows the driver's,
+  strength-weighted; validated driver-before-follower); duty-cycle fields on
+  `FaultSpec` (`duty_on_hours`/`duty_off_hours`, on-first inside the envelope).
+  **Baseline draws byte-identically** — the random-dispatch path consumes no
+  extra rng, verified in tests. `ground_truth_faults` records the envelope
+  only; the duty cycle stays in config (scorer judges IoU vs envelope).
+- Three adversarial configs (`sim_correlated`/`sim_overlap`/`sim_intermittent`
+  .yaml), each a one-line-header diff from baseline; ETCH→DEPOSITION coupling
+  (str 0.8), F6 Center@IMPLANT overlapping F2, F1 8h-on/8h-off. All fit the
+  test-split map inventory (worst 84 %) across every config + sweep point.
+- Ablation modes (`predict.py`): `load_classifier_outputs(..., mode=)` —
+  calibrated (Phase 1), raw (sigmoid(logit)>0.5 on cached logits, no
+  inference), oracle (simulated truth, harness-side like attach). `db.py`
+  gained `memory_db`/`create_schema`/`load_tables` so orchestration builds
+  disposable in-memory DBs (no file churn over ~105 runs).
+- Orchestration (`sensitivity.py`): `run_scenario`, `run_over_seeds` +
+  `seed_summary` (seed-averaging separates the lever from RNG-phase noise —
+  the extra draws a correlated dispatch consumes shift every later label
+  draw), `sweep_intensity`. `scripts/sensitivity.py` runs all three
+  experiments → 3 figures (`assets/sens_scenarios`, `sens_ablation`,
+  `sens_detection_curve`) + `outputs/sensitivity_*.parquet`.
+- `docs/SENSITIVITY.md`: method, the seed recalibration, per-confounder
+  mechanism (incl. why the correlated trap doesn't fool the ranking), the
+  ablation null, the detection curve, and a "where it breaks / how you'd know
+  in production" table.
+- Tests: **44 passing** (31 prior + 13 new) — coupling correlates + baseline
+  unchanged + determinism, duty exposures only in on-phases + envelope has no
+  duty cols, config validation (coupling ordering, duty period fits), raw@0.5
+  == recomputed sigmoid, oracle == ground truth exactly (0/0), run_scenario
+  reproduces the Phase 2 baseline headline, ablation modes agree on baseline.
+
+**Decisions / deviations:**
+- **Seed-averaging is the reporting unit**, not seed 42. A single seed
+  conflates the config lever with RNG-phase noise (an unrelated fault's z
+  wanders seed to seed because the coupling/duty changes consume different
+  randoms). Every Phase 3 headline is a 5-seed mean; the single-seed
+  per-fault tables are illustrative only.
+- The `attr_suspects.sql` grid gets no `min_excess` gate (unlike the window
+  detector) — so the near-zero-label small-count artifact stays visible as an
+  honest failure mode in SENSITIVITY.md rather than being silently floored.
+- Sweep swept F4 only (the designated weak fault). Widening to all faults is
+  possible but the F4 curve already establishes the floor; no gold-plating.
+
+**Next (Phase 4, fresh session):** package — README (mission, schema diagram,
+scored tables from STATUS.md verbatim, figure gallery, quickstart
+build_db→attach→attribute→sensitivity, zero-IP boundary, sibling cross-links),
+rehearsal-rig MES-mapping section (doc only), update main README + workspace
+ROADMAP + ALEX8642 profile, resume bullet with honest numbers (attribution
+**precision** ~0.9–1.0 reliable, **recall** 0.48±0.30 baseline — lead with the
+precision/recall split, not "built a pipeline"), fresh-clone quickstart
+verified in a temp dir. /code-review pre-commit, commit, push.

@@ -1,0 +1,48 @@
+# sim_overlap.yaml — Phase 3(b): two faults with the SAME signature label
+# overlapping in time on DIFFERENT steps. ONE lever vs sim_baseline.yaml:
+# fault F6 added (Center @ IMPLANT-T2-C1, 70–120 h) overlapping F2
+# (Center @ DEPOSITION-T2-C1, 60–110 h) for 40 of its 50 hours; everything
+# else is identical.
+#
+# The mechanism under test: each fault's struck wafers route uniformly
+# through the OTHER step, so F6's wafers inflate the rest-of-step control
+# rate that F2 is contrasted against (and vice versa) — mutual dilution.
+# Does the per-step contrast still isolate both chambers, or do two
+# simultaneous same-signature excursions mask each other?
+
+seed: 42
+sim_start: "2026-06-01 00:00:00"
+product: PRD-A
+n_lots: 40
+wafers_per_lot: 25
+lot_interarrival_hours: 4.0
+wafer_stagger_minutes: 2.0
+queue_mean_minutes: 10.0
+inspect_delay_minutes: 30.0
+dispatch: random
+db_path: outputs/sens_overlap.duckdb
+
+route:
+  - {name: OXIDATION,  process_type: furnace,     tools: 2, chambers_per_tool: 2, process_minutes: 50}
+  - {name: LITHO,      process_type: lithography, tools: 3, chambers_per_tool: 1, process_minutes: 30}
+  - {name: ETCH,       process_type: dry_etch,    tools: 2, chambers_per_tool: 3, process_minutes: 40}
+  - {name: DEPOSITION, process_type: cvd,         tools: 2, chambers_per_tool: 2, process_minutes: 45}
+  - {name: IMPLANT,    process_type: ion_implant, tools: 2, chambers_per_tool: 1, process_minutes: 25}
+  - {name: CMP,        process_type: cmp,         tools: 2, chambers_per_tool: 2, process_minutes: 35}
+
+baseline:
+  center_donut: 0.38
+  edge: 0.38
+  loc: 0.32
+  scratch: 0.32
+  near_full: 0.02
+  random_pattern: 0.05
+
+faults:
+  - {fault_id: F1, chamber: ETCH-T1-C2,       label: Edge-Ring, start_hour: 24,  duration_hours: 48, p_acquire: 0.70}
+  - {fault_id: F2, chamber: DEPOSITION-T2-C1, label: Center,    start_hour: 60,  duration_hours: 50, p_acquire: 0.50}
+  - {fault_id: F3, chamber: CMP-T1-C2,        label: Scratch,   start_hour: 10,  duration_hours: 40, p_acquire: 0.50}
+  - {fault_id: F4, chamber: OXIDATION-T2-C1,  label: Donut,     start_hour: 90,  duration_hours: 40, p_acquire: 0.25}
+  - {fault_id: F5, chamber: ETCH-T2-C3,       label: Edge-Loc,  start_hour: 95,  duration_hours: 40, p_acquire: 0.60}
+  # <- the lever: same signature as F2, different step, 40 h time overlap
+  - {fault_id: F6, chamber: IMPLANT-T2-C1,    label: Center,    start_hour: 70,  duration_hours: 50, p_acquire: 0.50}

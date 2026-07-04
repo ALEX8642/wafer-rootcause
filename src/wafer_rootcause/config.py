@@ -58,13 +58,39 @@ class StepSpec:
 
 @dataclass
 class FaultSpec:
-    """A planted excursion: one chamber, one time window, one signature."""
+    """A planted excursion: one chamber, one time window, one signature.
+
+    duty_on_hours/duty_off_hours (both or neither) make the fault
+    intermittent: inside the [start, start+duration] envelope, exposure
+    cycles on/off starting with an on-phase at start_hour. The
+    ground_truth_faults table records the envelope only — the duty cycle
+    lives in the config, and the scorer's window IoU is judged against
+    the envelope (documented in docs/SENSITIVITY.md).
+    """
     fault_id: str             # 'F1'
     chamber: str              # chamber_id, e.g. 'ETCH-T1-C2'
     label: str                # signature label the fault elevates (mixable only)
     start_hour: float         # relative to sim_start
     duration_hours: float
     p_acquire: float          # P(exposed wafer acquires the label)
+    duty_on_hours: float | None = None
+    duty_off_hours: float | None = None
+
+
+@dataclass
+class CouplingSpec:
+    """Correlated dispatch: the follower step's chamber choice follows the
+    driver step's.
+
+    With probability `strength`, a wafer that took chamber index i at the
+    driver step takes chamber index i mod n_follower at the follower step
+    (canonical route_chambers order); otherwise the choice is uniform.
+    This is the classic false-attribution trap: wafers through a faulty
+    driver chamber pile into one innocent follower chamber.
+    """
+    driver_step: str          # route step name, e.g. 'ETCH'
+    follower_step: str        # a LATER route step, e.g. 'DEPOSITION'
+    strength: float           # P(follower follows the mapping) in (0, 1]
 
 
 @dataclass
@@ -145,7 +171,8 @@ class SimConfig:
     wafer_stagger_minutes: float = 2.0    # within-lot release offset
     queue_mean_minutes: float = 10.0      # exponential queue delay per step
     inspect_delay_minutes: float = 30.0   # last step end → inspection
-    dispatch: str = "random"              # chamber choice policy (Phase 3 adds more)
+    dispatch: str = "random"              # 'random' | 'correlated' (needs coupling)
+    coupling: CouplingSpec | None = None  # required iff dispatch == 'correlated'
     db_path: str = "outputs/wafer_rootcause.duckdb"
     route: list[StepSpec] = field(default_factory=list)
     baseline: BaselineRates = field(default_factory=BaselineRates)
@@ -157,6 +184,8 @@ class SimConfig:
         raw["route"] = [StepSpec(**s) for s in raw.get("route", [])]
         raw["baseline"] = BaselineRates(**raw.get("baseline", {}))
         raw["faults"] = [FaultSpec(**f) for f in raw.get("faults", [])]
+        if raw.get("coupling") is not None:
+            raw["coupling"] = CouplingSpec(**raw["coupling"])
         cfg = cls(**raw)
         cfg.validate()
         return cfg
@@ -164,8 +193,28 @@ class SimConfig:
     def validate(self) -> None:
         if not self.route:
             raise ValueError("route must have at least one step")
-        if self.dispatch != "random":
+        if self.dispatch not in ("random", "correlated"):
             raise ValueError(f"Unknown dispatch policy: {self.dispatch!r}")
+        if (self.dispatch == "correlated") != (self.coupling is not None):
+            raise ValueError(
+                "dispatch: correlated and a coupling block go together — "
+                f"got dispatch={self.dispatch!r}, coupling="
+                f"{'set' if self.coupling else 'absent'}")
+        if self.coupling is not None:
+            names = [s.name for s in self.route]
+            for role in ("driver_step", "follower_step"):
+                if getattr(self.coupling, role) not in names:
+                    raise ValueError(
+                        f"coupling.{role}={getattr(self.coupling, role)!r} "
+                        "is not a route step")
+            if (names.index(self.coupling.driver_step)
+                    >= names.index(self.coupling.follower_step)):
+                raise ValueError(
+                    "coupling.driver_step must come before follower_step "
+                    "in the route")
+            if not 0.0 < self.coupling.strength <= 1.0:
+                raise ValueError(
+                    f"coupling.strength={self.coupling.strength} outside (0, 1]")
         if self.n_lots < 1 or self.wafers_per_lot < 1:
             raise ValueError("n_lots and wafers_per_lot must be >= 1")
         if self.lot_interarrival_hours <= 0:
@@ -201,3 +250,14 @@ class SimConfig:
                 raise ValueError(f"{f.fault_id}: p_acquire outside (0, 1]")
             if f.start_hour < 0 or f.duration_hours <= 0:
                 raise ValueError(f"{f.fault_id}: bad window")
+            if (f.duty_on_hours is None) != (f.duty_off_hours is None):
+                raise ValueError(
+                    f"{f.fault_id}: duty_on_hours and duty_off_hours must be "
+                    "set together")
+            if f.duty_on_hours is not None:
+                if f.duty_on_hours <= 0 or f.duty_off_hours <= 0:
+                    raise ValueError(f"{f.fault_id}: duty phases must be > 0")
+                if f.duty_on_hours + f.duty_off_hours >= f.duration_hours:
+                    raise ValueError(
+                        f"{f.fault_id}: duty period must fit inside the window "
+                        "at least twice — otherwise the fault is not intermittent")

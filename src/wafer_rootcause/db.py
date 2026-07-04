@@ -19,6 +19,20 @@ TABLE_ORDER = [
 ]
 
 
+def create_schema(con: duckdb.DuckDBPyConnection,
+                  schema_path: str | Path = SCHEMA_PATH) -> None:
+    """Run sql/schema.sql on `con` (all tables, classifier_outputs empty)."""
+    con.execute(Path(schema_path).read_text())
+
+
+def load_tables(con: duckdb.DuckDBPyConnection,
+                tables: dict[str, pd.DataFrame]) -> None:
+    """Insert the simulated tables into an already-schema'd connection."""
+    for name in TABLE_ORDER:
+        df = tables[name]  # noqa: F841 — resolved by DuckDB's replacement scan
+        con.execute(f"INSERT INTO {name} BY NAME SELECT * FROM df")
+
+
 def build_db(tables: dict[str, pd.DataFrame], db_path: str | Path,
              schema_path: str | Path = SCHEMA_PATH) -> None:
     """Write `tables` into a fresh DuckDB file at `db_path`."""
@@ -28,12 +42,23 @@ def build_db(tables: dict[str, pd.DataFrame], db_path: str | Path,
 
     con = duckdb.connect(str(db_path))
     try:
-        con.execute(Path(schema_path).read_text())
-        for name in TABLE_ORDER:
-            df = tables[name]  # noqa: F841 — resolved by DuckDB's replacement scan
-            con.execute(f"INSERT INTO {name} BY NAME SELECT * FROM df")
+        create_schema(con, schema_path)
+        load_tables(con, tables)
     finally:
         con.close()
+
+
+def memory_db(tables: dict[str, pd.DataFrame],
+              schema_path: str | Path = SCHEMA_PATH) -> duckdb.DuckDBPyConnection:
+    """A fresh in-memory DuckDB with the schema loaded and `tables` inserted.
+
+    For orchestration that builds many disposable DBs (the Phase 3 sweep):
+    no file churn, and the caller owns closing the connection.
+    """
+    con = duckdb.connect(":memory:")
+    create_schema(con, schema_path)
+    load_tables(con, tables)
+    return con
 
 
 def connect(db_path: str | Path, read_only: bool = True) -> duckdb.DuckDBPyConnection:
