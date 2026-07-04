@@ -7,31 +7,49 @@ chambers, timestamps) joined to **real classifier outputs** from
 analysis in SQL recovering planted faults against known ground truth —
 attribution quality is *scored*, not asserted.
 
-**Status: Phase 0 (scaffold + schema + simulator) complete.** See
-[STATUS.md](STATUS.md) for the phase log and
-[docs/SCHEMA.md](docs/SCHEMA.md) for the schema.
+**Status: Phase 1 (classifier integration + SQL EDA) complete.** See
+[STATUS.md](STATUS.md) for the phase log, [docs/SCHEMA.md](docs/SCHEMA.md)
+for the schema, and [docs/EDA.md](docs/EDA.md) for the EDA.
 
 ![ERD](assets/erd.png)
 
-## Quickstart (Phase 0 scope)
+## Quickstart
 
 ```bash
 pip install -r requirements.txt
 python scripts/build_db.py            # configs/sim_baseline.yaml → outputs/wafer_rootcause.duckdb
-pytest                                # integrity, monotonicity, determinism, fault-effect sanity
+python scripts/attach_and_predict.py  # attach real test-split maps + run the classifier (CPU, ~3 min once)
+python scripts/eda.py                 # named SQL queries in sql/ → assets/eda_*.png
+pytest
 ```
 
-All-CPU, no GPU anywhere in this project. The build is deterministic:
-same config + seed → identical database.
+`attach_and_predict.py` needs a sibling checkout of
+[wafer-mixed](https://github.com/ALEX8642/wafer-mixed) (trained checkpoint,
+thresholds, MixedWM38 data + persisted split) — path configurable in
+`configs/attach_baseline.yaml`. Each simulated wafer is dressed with a real
+MixedWM38 **test-split** map whose true label set matches the wafer's
+simulated label set, then classified by wafer-mixed's checkpoint at its
+calibrated per-label thresholds — so `classifier_outputs` carries the
+model's honest test-split noise, not the simulator's truth.
+
+All-CPU, no GPU anywhere in this project. Builds are deterministic:
+same configs + seeds → identical database; inference is cached to parquet
+and never re-runs on rebuild.
 
 ## Layout
 
 - `sql/schema.sql` — the schema DDL (the analytics in this repo live in SQL)
-- `src/wafer_rootcause/` — simulator, config, DB loading (Python is glue)
-- `configs/sim_baseline.yaml` — declarative sim: route, fault list, rates, seed
-- `docs/SCHEMA.md` — data dictionary + design rules (ground-truth firewall)
+- `sql/eda_*.sql` — named EDA queries (prevalence, rate by chamber, rate
+  over time, lot yield, co-occurrence)
+- `src/wafer_rootcause/` — simulator, config, map attachment, inference
+  bridge, DB loading (Python is glue)
+- `configs/` — declarative sim (`sim_baseline.yaml`) + attachment/inference
+  (`attach_baseline.yaml`)
+- `docs/SCHEMA.md` — data dictionary + design rules (ground-truth firewall);
+  `docs/EDA.md` — the EDA narrative
 - `tests/` — referential integrity, timestamp monotonicity, determinism,
-  combo validity, fault-effect sanity
+  combo validity, fault-effect sanity, assignment consistency, prediction
+  round-trip, live spot-check against wafer-mixed's own pipeline
 
 ## Simulated data only
 

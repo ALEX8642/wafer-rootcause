@@ -1,7 +1,18 @@
-# Phase 0 runtime — all-CPU project, no torch needed until Phase 1
-# (classifier inference; add torch pins from wafer-mixed then).
+# Core (Phase 0): simulator + DuckDB analytics. Parquet IO goes through
+# DuckDB, so no pyarrow is needed.
 duckdb>=1.5
 numpy>=2.0
 pandas>=2.0
 matplotlib>=3.8
 pyyaml>=6.0
+
+# Phase 1: classifier inference reuses wafer-mixed's own modules from a
+# sibling checkout, so its runtime deps apply here too. Pins follow
+# wafer-mixed's requirements.txt. This repo is CPU-only — note the default
+# PyPI torch wheel on Linux bundles CUDA (~multi-GB); for a lean install:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch>=2.7.1,<2.9
+torchvision>=0.22.1,<0.24
+scipy>=1.11
+scikit-learn>=1.5
+tqdm>=4.66

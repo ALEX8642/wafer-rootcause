@@ -65,3 +65,76 @@ test-split maps without replacement, persist assignment), run the
 wafer-mixed checkpoint on CPU over assigned maps, apply per-label T + τ,
 load `classifier_outputs`, cache predictions to parquet; SQL EDA →
 docs/EDA.md. Torch pins come from wafer-mixed's requirements.txt.
+
+## Phase 1 — Classifier integration + SQL EDA ✅ (2026-07-04)
+
+**Done:**
+- Map attachment (`src/wafer_rootcause/attach.py` +
+  `scripts/attach_and_predict.py`): each simulated wafer gets a wafer-mixed
+  **test-split** map whose true label set matches its simulated label set,
+  sampled without replacement, deterministic per `assign_seed` (own seed,
+  independent of the sim seed; `configs/attach_baseline.yaml`). Persisted
+  to `outputs/map_assignment.parquet` + `inspections.map_id` (= MixedWM38
+  npz row index). Baseline demand fits comfortably: tightest combo is
+  Normal at 72 % of its 200 test maps.
+- Inference (`src/wafer_rootcause/predict.py`): imports wafer-mixed's OWN
+  modules from the sibling checkout (model, data, evaluate, calibrate,
+  metrics) — zero re-implementation of the architecture / encoding /
+  T + τ rule. One CPU pass over the FULL test split (7,603 maps, 2 m 20 s,
+  batch 64) cached to `outputs/predictions_test.parquet` (map_id, label,
+  raw logit, calibrated prob, predicted) — rebuilds/re-seeds only re-join
+  the cache, and the raw logits mean Phase 3's raw-@0.5 ablation needs no
+  new inference either. `classifier_outputs` loaded: 8,000 rows.
+- **Honest-noise check (scorer side):** on this 1,000-wafer draw the
+  classifier makes 9 label-level escapes + 8 false alarms (worst: Scratch
+  4 escapes, Loc 6 FAs). Checkpoint epoch 7, val macro-F1 0.9906.
+- SQL EDA: 5 named queries in `sql/eda_*.sql` (prevalence, rate by
+  step/tool/chamber, hourly rates over time, lot yield, co-occurrence),
+  rendered by `scripts/eda.py` → 4 figures in assets/, narrative in
+  `docs/EDA.md`. **Eyeball check passed:** 4 of 5 planted faults are the
+  top-4 chamber-vs-step excursions in the raw rates (F5 +0.185, F1 +0.139,
+  F4 +0.097, F2 +0.095); F3 (Scratch @ CMP-T1-C2) leads its step (0.324 vs
+  0.261–0.294) but is diluted below noise entries in the whole-horizon
+  marginal — the expected Phase 2 case for time-resolved localisation.
+  A routing-noise coincidence (ETCH-T1-C1 Loc +0.075) sits at rank 5:
+  the motivating example for Phase 2's significance testing + BH control.
+- Tests: **22 passing** (12 Phase 0 + 10 new) — every wafer assigned
+  exactly once, no map reused, assigned map's true labels == simulated
+  labels, map_ids ⊆ test split (checked against splits.npz directly),
+  assignment determinism, inspections round-trip, 8 rows/wafer, DB ==
+  parquet cache round-trip, predicted == (prob > τ) for all rows, and a
+  live 12-map spot-check that reruns wafer-mixed's encode→model→
+  scale_probs→predict_multihot end-to-end and matches the DB. Phase 1
+  tests skip cleanly if the wafer-mixed checkout or cache is absent.
+
+**Pre-commit review (multi-angle) — applied:** forced `device="cpu"` after
+MixedConfig init (WAFER_DEVICE env var otherwise outranks it — real risk on
+the 5090-rig shell); prediction cache now fingerprinted
+(`predictions_test.meta.json`, sha256 of checkpoint + thresholds; stale
+reuse is a hard error, verified); DB mutations moved after the slow
+inference step (no mixed assignment/predictions state on abort); import
+bridge asserts the loaded wafer_mixed lives under the configured checkout
+AND that `LABEL_NAMES == LABELS` (order drift would scramble every column
+while staying test-green); quote-escaped parquet paths; eda.py errors
+cleanly on empty classifier_outputs and reads db_path from the attach
+config. Accepted-risk: τ rule (`>`) restated in docs — the live spot-check
+recomputes through wafer-mixed's `predict_multihot`, so a rule change fails
+the suite after any cache rebuild.
+
+**Decisions / deviations:**
+- `map_id` = global MixedWM38.npz row index (not position-within-test-split)
+  so it's directly meaningful against wafer-mixed's arrays; schema comment +
+  SCHEMA.md updated.
+- Prediction cache covers the full test split, not just assigned maps —
+  30 s more inference once, in exchange for Phase 3 never touching torch.
+- Parquet IO via DuckDB (`COPY`/`read_parquet`) — avoids a pyarrow dep.
+- Firewall extended to figures: EDA plots draw predictions only, no
+  ground-truth fault-window overlays (excursions must be visible in
+  predictions alone or Phase 2 has nothing to find).
+
+**Next (Phase 2, fresh session):** commonality analysis in SQL — per
+(label, step) two-proportion test chamber-vs-rest, BH correction across the
+label × step × chamber grid, ranked suspects; window localisation via
+rolling rates; scorer (precision@1/@3, recall, window IoU, latency) —
+`ground_truth_faults` allowed in the scorer only. Figures + docs/ANALYSIS.md.
+Watch F3 (needs time resolution) and the ETCH-T1-C1 Loc false suspect.

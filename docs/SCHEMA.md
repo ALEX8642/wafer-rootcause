@@ -83,15 +83,15 @@ queue delays and ±10 % jittered process times.
 | wafer_id | VARCHAR FK→wafers, UNIQUE | one end-of-line inspection per wafer |
 | inspect_ts | TIMESTAMP | after the last route step |
 | station | VARCHAR | inspection station id |
-| map_id | INTEGER, NULL | wafer-mixed test-split map index; assigned in Phase 1 |
+| map_id | INTEGER, NULL | MixedWM38.npz row index of the attached map (always a test-split row); written by `scripts/attach_and_predict.py` |
 
-### classifier_outputs *(empty until Phase 1)*
+### classifier_outputs *(loaded by `scripts/attach_and_predict.py`)*
 | column | type | description |
 |---|---|---|
 | wafer_id | VARCHAR PK,FK→wafers | |
 | label | VARCHAR PK | one of the 8 signature labels |
 | prob | DOUBLE | temperature-calibrated probability (per-label T) |
-| predicted | BOOLEAN | `prob >= tau_label` from wafer-mixed `thresholds.json` |
+| predicted | BOOLEAN | `prob > tau_label` from wafer-mixed `thresholds.json` (same strict rule as wafer-mixed's `predict_multihot`) |
 
 8 rows per wafer — the model's view of the wafer, which is what all
 attribution queries consume (never the ground truth).

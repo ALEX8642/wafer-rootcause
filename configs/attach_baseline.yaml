@@ -1,0 +1,18 @@
+# attach_baseline.yaml — Phase 1: map attachment + classifier inference.
+#
+# Points at a sibling wafer-mixed checkout for the trained checkpoint,
+# thresholds.json and the MixedWM38 data + persisted split. Nothing from
+# wafer-mixed is copied into this repo.
+#
+# assign_seed is independent of the sim seed: the same fab history can be
+# re-dressed with a different draw of matching maps without resimulating.
+
+wafer_mixed_root: ../wafer-mixed
+checkpoint: outputs/best.pt            # relative to wafer_mixed_root
+thresholds: outputs/thresholds.json    # relative to wafer_mixed_root
+assign_seed: 42
+batch_size: 64                         # CPU inference batch
+num_workers: 2
+db_path: outputs/wafer_rootcause.duckdb
+assignment_path: outputs/map_assignment.parquet
+cache_path: outputs/predictions_test.parquet

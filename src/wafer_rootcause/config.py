@@ -20,6 +20,19 @@ from wafer_rootcause.labels import MIXABLE
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _yaml_mapping(cls, path: str | Path) -> dict:
+    """Load a YAML mapping and reject keys the dataclass doesn't declare."""
+    raw = yaml.safe_load(Path(path).read_text())
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: expected a YAML mapping, got "
+                         f"{type(raw).__name__}")
+    known = {f.name for f in dataclasses.fields(cls)}
+    unknown = set(raw) - known
+    if unknown:
+        raise ValueError(f"{path}: unknown config keys: {sorted(unknown)}")
+    return raw
+
+
 def route_chambers(route):
     """Yield (step_idx, spec, tool_id, chamber_id) in canonical order.
 
@@ -72,6 +85,56 @@ class BaselineRates:
 
 
 @dataclass
+class AttachConfig:
+    """Phase 1 settings: map attachment + classifier inference.
+
+    `wafer_mixed_root` points at a sibling checkout of the wafer-mixed repo —
+    its trained checkpoint, thresholds.json, MixedWM38.npz and persisted
+    split are the inputs here; nothing is copied into this repo.
+    """
+    wafer_mixed_root: str = "../wafer-mixed"
+    checkpoint: str = "outputs/best.pt"            # relative to wafer_mixed_root
+    thresholds: str = "outputs/thresholds.json"    # relative to wafer_mixed_root
+    assign_seed: int = 42          # map-assignment RNG, independent of the sim seed
+    batch_size: int = 64           # CPU inference batch
+    num_workers: int = 2
+    db_path: str = "outputs/wafer_rootcause.duckdb"
+    assignment_path: str = "outputs/map_assignment.parquet"
+    cache_path: str = "outputs/predictions_test.parquet"
+
+    # Path fields stay as the YAML strings; resolve on access so a config
+    # with an absolute wafer_mixed_root also works (Path anchors absorb it).
+    @property
+    def mixed_root(self) -> Path:
+        return (REPO_ROOT / self.wafer_mixed_root).resolve()
+
+    @property
+    def checkpoint_path(self) -> Path:
+        return self.mixed_root / self.checkpoint
+
+    @property
+    def thresholds_path(self) -> Path:
+        return self.mixed_root / self.thresholds
+
+    # Single owner of wafer-mixed's on-disk data layout in this repo
+    # (attach.py, conftest and tests all go through these).
+    @property
+    def npz_path(self) -> Path:
+        return self.mixed_root / "data" / "raw" / "MixedWM38.npz"
+
+    @property
+    def splits_path(self) -> Path:
+        return self.mixed_root / "data" / "splits.npz"
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "AttachConfig":
+        cfg = cls(**_yaml_mapping(cls, path))
+        if cfg.batch_size < 1 or cfg.num_workers < 0:
+            raise ValueError("batch_size must be >= 1 and num_workers >= 0")
+        return cfg
+
+
+@dataclass
 class SimConfig:
     seed: int = 42
     sim_start: str | datetime = "2026-06-01 00:00:00"  # YAML may parse it either way
@@ -90,17 +153,10 @@ class SimConfig:
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimConfig":
-        raw = yaml.safe_load(Path(path).read_text())
-        if not isinstance(raw, dict):
-            raise ValueError(f"{path}: expected a YAML mapping, got "
-                             f"{type(raw).__name__}")
+        raw = _yaml_mapping(cls, path)
         raw["route"] = [StepSpec(**s) for s in raw.get("route", [])]
         raw["baseline"] = BaselineRates(**raw.get("baseline", {}))
         raw["faults"] = [FaultSpec(**f) for f in raw.get("faults", [])]
-        known = {f.name for f in dataclasses.fields(cls)}
-        unknown = set(raw) - known
-        if unknown:
-            raise ValueError(f"Unknown config keys: {sorted(unknown)}")
         cfg = cls(**raw)
         cfg.validate()
         return cfg

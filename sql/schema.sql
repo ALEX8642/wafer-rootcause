@@ -64,15 +64,17 @@ CREATE TABLE inspections (
     wafer_id      VARCHAR NOT NULL UNIQUE REFERENCES wafers(wafer_id),
     inspect_ts    TIMESTAMP NOT NULL,
     station       VARCHAR NOT NULL,
-    map_id        INTEGER                   -- wafer-mixed test-split map index; NULL until Phase 1
+    map_id        INTEGER                   -- MixedWM38.npz row index of the attached map
+                                            -- (always a test-split row); NULL until attachment
 );
 
--- Classifier predictions: 8 rows per inspected wafer (loaded in Phase 1).
+-- Classifier predictions: 8 rows per inspected wafer
+-- (loaded by scripts/attach_and_predict.py).
 CREATE TABLE classifier_outputs (
     wafer_id  VARCHAR NOT NULL REFERENCES wafers(wafer_id),
     label     VARCHAR NOT NULL,             -- one of the 8 signature labels
     prob      DOUBLE  NOT NULL CHECK (prob >= 0 AND prob <= 1),  -- calibrated (per-label T)
-    predicted BOOLEAN NOT NULL,             -- prob >= per-label tau (thresholds.json)
+    predicted BOOLEAN NOT NULL,             -- prob > per-label tau (thresholds.json)
     PRIMARY KEY (wafer_id, label)
 );
 
