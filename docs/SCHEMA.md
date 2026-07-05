@@ -16,8 +16,8 @@ practical, designed to read as Postgres-ready). Built by
 - **Rehearsal rig.** Tables and columns mirror what a real MES extract
   provides (lot genealogy, equipment/chamber tracking, unit process
   history, inspection events), so the private work-data extract can later
-  be loaded by swapping the loader — analysis SQL unchanged. The mapping
-  table is written in Phase 4.
+  be loaded by swapping the loader — analysis SQL unchanged. The
+  MES-source mapping table lives in the README's *Rehearsal rig* section.
 - **Label-set validity.** The simulator only emits label sets that exist
   in MixedWM38 (at most one of Center/Donut, at most one of
   Edge-Loc/Edge-Ring, Loc/Scratch free, Near-full/Random single-only), so

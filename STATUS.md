@@ -293,3 +293,45 @@ ROADMAP + ALEX8642 profile, resume bullet with honest numbers (attribution
 **precision** ~0.9–1.0 reliable, **recall** 0.48±0.30 baseline — lead with the
 precision/recall split, not "built a pipeline"), fresh-clone quickstart
 verified in a temp dir. /code-review pre-commit, commit, push.
+
+## Phase 4 — Package ✅ (2026-07-04)
+
+**Done:**
+- README rewritten as the package entry point: mission, why simulated-MES +
+  real predictions, the SQL-first framing, headline results (Phase 2 single-
+  draw table + Phase 3 seed-averaged table, both verbatim from this file — not
+  recomputed), figure gallery (2 attribution + 3 sensitivity PNGs), quickstart
+  (build_db→attach_and_predict→attribute→sensitivity→pytest), schema + ERD +
+  firewall, the **rehearsal-rig MES-source mapping table** (which real MES
+  export feeds each schema table; loader swaps, analysis SQL unchanged;
+  ground_truth_faults has no production analogue — scorer is simulation-only),
+  simulated-data boundary, sibling cross-links.
+- `docs/SCHEMA.md` rehearsal-rig note updated to point at the README mapping
+  (was "written in Phase 4").
+- Cross-repo: `wafer-defect-classifier` README Extensions section gained a
+  wafer-rootcause paragraph; workspace `ROADMAP.md` moved the project to the
+  Done table + marked sequence item 2 complete; `ALEX8642` profile README moved
+  "Root-cause analytics" from *In progress* into the portfolio table with the
+  honest precision/recall headline.
+- Fresh-clone quickstart verified end-to-end in a temp dir (git clone of the
+  repo, absolute `wafer_mixed_root`, all-CPU): build_db → attach_and_predict
+  (real inference) → attribute → sensitivity → pytest all green from a clean
+  checkout with no pre-existing outputs/.
+
+**Resume bullet (honest numbers, precision/recall split leads):**
+> Built a SQL-first root-cause attribution pipeline: a simulated MES schema
+> (DuckDB) joined to a real multi-label wafer classifier's outputs, recovering
+> planted equipment faults by chamber-vs-step commonality analysis
+> (two-proportion z-tests + Benjamini–Hochberg FDR control, window
+> localisation) — all in portable SQL, Python only for glue and figures.
+> Because faults are planted, attribution is *scored*: precision@1 holds
+> ~0.90–1.00 under correlated-routing / overlapping / intermittent confounders,
+> while recall is honestly low and high-variance (0.48 ± 0.30 over seeds), set
+> by fault strength and horizon dilution. A classifier-noise ablation is a
+> reported null — oracle vs calibrated vs raw predictions give identical
+> attribution, so root cause here is statistics-bound, not classifier-bound.
+> Doubles as a rehearsal rig: a private MES extract loads with a loader swap
+> and zero analysis-SQL changes.
+
+**Project complete.** All 5 phases (0–4) done and pushed. Next roadmap project:
+deployment + drift monitoring (fresh repo, plan doc written when it starts).
